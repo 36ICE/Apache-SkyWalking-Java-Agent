@@ -55,6 +55,7 @@ import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 
 /**
+ * sky-walking agent的入口
  * The main entrance of sky-walking agent, based on javaagent mechanism.
  */
 public class SkyWalkingAgent {
@@ -66,6 +67,7 @@ public class SkyWalkingAgent {
     public static void premain(String agentArgs, Instrumentation instrumentation) throws PluginException {
         final PluginFinder pluginFinder;
         try {
+            //初始化加载agent.config配置文件，会检查Java agent参数以及环境变量是否覆盖了相应的配置项
             SnifferConfigInitializer.initializeCoreConfig(agentArgs);
         } catch (Exception e) {
             // try to resolve a new logger, and use the new logger to write the error log here
@@ -78,6 +80,7 @@ public class SkyWalkingAgent {
         }
 
         try {
+            //插件发现器，传入所有插件，然后使用PluginResourcesResolver进行插件资源解析
             pluginFinder = new PluginFinder(new PluginBootstrap().loadPlugins());
         } catch (AgentPackageNotFoundException ape) {
             LOGGER.error(ape, "Locate agent.jar failure. Shutting down.");
@@ -86,9 +89,9 @@ public class SkyWalkingAgent {
             LOGGER.error(e, "SkyWalking agent initialized failure. Shutting down.");
             return;
         }
-
+        //字节码增强技术，ByteBuddy是一个可以在运行时动态生成java class的类库,
         final ByteBuddy byteBuddy = new ByteBuddy().with(TypeValidation.of(Config.Agent.IS_OPEN_DEBUGGING_CLASS));
-
+        //JavaAgent构建器，忽略拦截配置
         AgentBuilder agentBuilder = new AgentBuilder.Default(byteBuddy).ignore(
                 nameStartsWith("net.bytebuddy.")
                         .or(nameStartsWith("org.slf4j."))
@@ -124,21 +127,24 @@ public class SkyWalkingAgent {
             }
         }
 
+        //java agent创建代理流程，这里会根据已加载的插件动态增强目标类，插入埋点逻辑。
         agentBuilder.type(pluginFinder.buildMatch())
                     .transform(new Transformer(pluginFinder))
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .with(new RedefinitionListener())
                     .with(new Listener())
                     .installOn(instrumentation);
-
+        ///插件发现器初始化完成
         PluginFinder.pluginInitCompleted();
 
         try {
+            //启动所有service，BootService是所有远程的接口
+            //使用SDK SPI加载的方式，并启动BootService服务
             ServiceManager.INSTANCE.boot();
         } catch (Exception e) {
             LOGGER.error(e, "Skywalking agent boot failure.");
         }
-
+        //虚拟机关闭的钩子函数，释放资源
         Runtime.getRuntime()
                 .addShutdownHook(new Thread(ServiceManager.INSTANCE::shutdown, "skywalking service shutdown thread"));
     }
